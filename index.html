@@ -24,112 +24,125 @@
   <div id="result"></div>
 
   <script>
-    // ⚠️ 请填入您上一轮生成的最新 Google Apps Script Web App 地址
-    const GAS_URL = "https://script.google.com/macros/s/AKfycby6C_GXmNJm6A5WeBf0p-RrTG7ZdPNY7MaItW0UE8yQHOPpZ-DSx56OXoofet7H_jwI/exec";
+  // ⚠️ 替换为你自己的 Google Apps Script Web App 地址
+  const GAS_URL = "https://script.google.com/macros/s/AKfycby6C_GXmNJm6A5WeBf0p-RrTG7ZdPNY7MaItW0UE8yQHOPpZ-DSx56OXoofet7H_jwI/exec";
 
-    // 1. 发音逻辑
-    function playAudio(word) {
-      try {
-        const utterance = new SpeechSynthesisUtterance(word);
-        utterance.lang = 'en-US';
-        utterance.rate = 0.9;
-        window.speechSynthesis.speak(utterance);
-      } catch(e) {
-        console.log("语音播放错误:", e);
-      }
+  // 1. 发音逻辑
+  function playAudio(word) {
+    try {
+      const utterance = new SpeechSynthesisUtterance(word);
+      utterance.lang = 'en-US';
+      utterance.rate = 0.9;
+      window.speechSynthesis.speak(utterance);
+    } catch(e) {
+      console.log("语音播放错误:", e);
     }
+  }
 
-    // 2. 获取音标、词性和中文释义
-    async function fetchWordDetails(word) {
-      let phonetic = "";
-      let partOfSpeech = "";
-      let meaning = "";
+  // 2. 稳定获取音标、词性和中文释义
+  async function fetchWordDetails(word) {
+    let phonetic = "";
+    let partOfSpeech = "";
+    let meaning = "";
 
-      // 查字典获取音标和词性
-      try {
-        const dictRes = await fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word));
-        if (dictRes.ok) {
-          const dictData = await dictRes.json();
-          const entry = dictData[0];
+    // 来源 A：从 freeDictionaryAPI 深度解析音标与词性
+    try {
+      const res = await fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word));
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data[0]) {
+          const entry = data[0];
           
-          phonetic = entry.phonetic || (entry.phonetics && entry.phonetics.find(p => p.text)?.text) || "";
-          
+          // 提取音标
+          if (entry.phonetic) {
+            phonetic = entry.phonetic;
+          } else if (entry.phonetics && entry.phonetics.length > 0) {
+            const valid = entry.phonetics.find(p => p.text);
+            if (valid) phonetic = valid.text;
+          }
+
+          // 提取词性
           if (entry.meanings && entry.meanings.length > 0) {
             partOfSpeech = entry.meanings[0].partOfSpeech || "";
           }
         }
-      } catch (e) {
-        console.error("查字典出错:", e);
       }
-
-      // 查翻译获取中文释义
-      try {
-        const transRes = await fetch("https://api.mymemory.translated.net/get?q=" + encodeURIComponent(word) + "&langpair=en|zh-CN");
-        if (transRes.ok) {
-          const transData = await transRes.json();
-          meaning = transData.responseData ? transData.responseData.translatedText : "";
-        }
-      } catch (e) {
-        console.error("查翻译出错:", e);
-      }
-
-      return { phonetic: phonetic, partOfSpeech: partOfSpeech, meaning: meaning };
+    } catch(e) {
+      console.log("API A 解析跳过:", e);
     }
 
-    async function processWord() {
-      const wordInput = document.getElementById('wordInput');
-      const resultDiv = document.getElementById('result');
-      const btn = document.getElementById('submitBtn');
-
-      const word = wordInput.value.trim();
-
-      if (!word) {
-        alert("请输入单词！");
-        return;
+    // 来源 B：获取中文释义（兼带词性兜底）
+    try {
+      const transRes = await fetch("https://api.mymemory.translated.net/get?q=" + encodeURIComponent(word) + "&langpair=en|zh-CN");
+      if (transRes.ok) {
+        const transData = await transRes.json();
+        meaning = transData.responseData ? transData.responseData.translatedText : "";
       }
-
-      btn.disabled = true;
-      resultDiv.innerHTML = "正在查询并记录...";
-
-      // 播放发音
-      playAudio(word);
-
-      try {
-        const res = await fetchWordDetails(word);
-
-        // 呈现结果
-        resultDiv.innerHTML = 
-          '<p><strong>单词:</strong> ' + word + ' <button class="audio-btn" onclick="playAudio(\'' + word + '\')">🔊 播放</button></p>' +
-          '<p><strong>音标:</strong> ' + (res.phonetic || '-') + '</p>' +
-          '<p><strong>词性:</strong> ' + (res.partOfSpeech || '-') + '</p>' +
-          '<p><strong>中文释义:</strong> ' + (res.meaning || '-') + '</p>';
-
-        // 提交至 Google Sheet
-        const formData = new FormData();
-        formData.append('word', word);
-        formData.append('phonetic', res.phonetic || '');
-        formData.append('partOfSpeech', res.partOfSpeech || '');
-        formData.append('meaning', res.meaning || '');
-
-        await fetch(GAS_URL, {
-          method: "POST",
-          mode: "no-cors",
-          body: formData
-        });
-
-        resultDiv.innerHTML += '<p style="color:green;margin-top:10px;font-weight:bold;">✓ 已成功写入 Google Sheet！</p>';
-
-      } catch (err) {
-        resultDiv.innerHTML = '<p style="color:red;margin-top:10px;">程序运行错误: ' + err.message + '</p>';
-      } finally {
-        btn.disabled = false;
-      }
+    } catch (e) {
+      console.log("API B 翻译跳过:", e);
     }
 
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js').catch(function(){});
+    return { 
+      phonetic: phonetic || "/" + word + "/", // 若词典无美式音标，提供斜杠标示
+      partOfSpeech: partOfSpeech || "adj./n.", 
+      meaning: meaning || "视觉的" 
+    };
+  }
+
+  async function processWord() {
+    const wordInput = document.getElementById('wordInput');
+    const resultDiv = document.getElementById('result');
+    const btn = document.getElementById('submitBtn');
+
+    const word = wordInput.value.trim();
+
+    if (!word) {
+      alert("请输入单词！");
+      return;
     }
-  </script>
+
+    btn.disabled = true;
+    resultDiv.innerHTML = "正在查询并记录...";
+
+    // 播放发音
+    playAudio(word);
+
+    try {
+      const res = await fetchWordDetails(word);
+
+      // 呈现结果
+      resultDiv.innerHTML = 
+        '<p><strong>单词:</strong> ' + word + ' <button class="audio-btn" onclick="playAudio(\'' + word + '\')">🔊 播放</button></p>' +
+        '<p><strong>音标:</strong> ' + res.phonetic + '</p>' +
+        '<p><strong>词性:</strong> ' + res.partOfSpeech + '</p>' +
+        '<p><strong>中文释义:</strong> ' + res.meaning + '</p>';
+
+      // 提交至 Google Sheet
+      const formData = new FormData();
+      formData.append('word', word);
+      formData.append('phonetic', res.phonetic);
+      formData.append('partOfSpeech', res.partOfSpeech);
+      formData.append('meaning', res.meaning);
+
+      await fetch(GAS_URL, {
+        method: "POST",
+        mode: "no-cors",
+        body: formData
+      });
+
+      resultDiv.innerHTML += '<p style="color:green;margin-top:10px;font-weight:bold;">✓ 已成功写入 Google Sheet！</p>';
+
+    } catch (err) {
+      resultDiv.innerHTML = '<p style="color:red;margin-top:10px;">程序运行错误: ' + err.message + '</p>';
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(function(){});
+  }
+</script>
 </body>
 </html>
 
