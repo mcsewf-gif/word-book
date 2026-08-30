@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>单词记账本 PWA</title>
+  <link rel="manifest" href="manifest.json">
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 500px; margin: 50px auto; padding: 20px; text-align: center; }
+    input, button { padding: 10px; margin: 10px 0; width: 80%; font-size: 16px; }
+    button { background-color: #4CAF50; color: white; border: none; cursor: pointer; }
+    button:disabled { background-color: #ccc; }
+    #result { margin-top: 20px; text-align: left; background: #f9f9f9; padding: 15px; border-radius: 5px; }
+  </style>
+</head>
+<body>
+
+  <h2>美式英语生词本</h2>
+  <input type="text" id="wordInput" placeholder="请输入英文单词...">
+  <br>
+  <button id="submitBtn" onclick="processWord()">查询、发音并保存</button>
+
+  <div id="result"></div>
+
+  <script>
+    // 替换为你的 Google Apps Script Web App URL
+    const GAS_URL = "YOUR_GOOGLE_APPS_SCRIPT_URL";
+
+    async function processWord() {
+      const word = document.getElementById('wordInput').value.trim();
+      const resultDiv = document.getElementById('result');
+      const btn = document.getElementById('submitBtn');
+
+      if (!word) {
+        alert("请输入单词！");
+        return;
+      }
+
+      btn.disabled = true;
+      resultDiv.innerHTML = "正在查询并记录...";
+
+      try {
+        // 1. 调用 Free Dictionary API 获取音标、词性及释义
+        const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
+        if (!dictRes.ok) throw new Error("未找到该单词信息");
+        
+        const dictData = await dictRes.json();
+        const entry = dictData[0];
+
+        // 获取美式音标/音频
+        let phonetic = entry.phonetic || "";
+        let audioUrl = "";
+        
+        if (entry.phonetics) {
+          const usPhonetic = entry.phonetics.find(p => p.audio && p.audio.includes("-us.mp3")) || entry.phonetics.find(p => p.audio);
+          if (usPhonetic) {
+            audioUrl = usPhonetic.audio;
+            phonetic = usPhonetic.text || phonetic;
+          }
+        }
+
+        const meaningObj = entry.meanings[0] || {};
+        const partOfSpeech = meaningObj.partOfSpeech || "";
+        const meaning = meaningObj.definitions[0]?.definition || "";
+
+        // 2. 播放美式发音 (若有音频链接则播放音频，否则使用系统 TTS 兜底)
+        if (audioUrl) {
+          const audio = new Audio(audioUrl);
+          audio.play();
+        } else {
+          const utterance = new SpeechSynthesisUtterance(word);
+          utterance.lang = 'en-US';
+          window.speechSynthesis.speak(utterance);
+        }
+
+        // 3. 展示在页面上
+        resultDiv.innerHTML = `
+          <p><strong>单词:</strong> ${word}</p>
+          <p><strong>音标:</strong> ${phonetic}</p>
+          <p><strong>词性:</strong> ${partOfSpeech}</p>
+          <p><strong>释义:</strong> ${meaning}</p>
+        `;
+
+        // 4. 发送到 Google Sheet
+        await fetch(GAS_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            word: word,
+            phonetic: phonetic,
+            partOfSpeech: partOfSpeech,
+            meaning: meaning
+          })
+        });
+
+        resultDiv.innerHTML += `<p style="color:green;">✓ 已自动保存到 Google Sheet！</p>`;
+
+      } catch (err) {
+        resultDiv.innerHTML = `<p style="color:red;">错误: ${err.message}</p>`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // 注册 Service Worker (PWA 支持)
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js');
+    }
+  </script>
+</body>
+</html>
