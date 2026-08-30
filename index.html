@@ -6,11 +6,12 @@
   <title>单词记账本 PWA</title>
   <link rel="manifest" href="manifest.json">
   <style>
-    body { font-family: Arial, sans-serif; max-width: 500px; margin: 50px auto; padding: 20px; text-align: center; }
-    input, button { padding: 10px; margin: 10px 0; width: 80%; font-size: 16px; }
-    button { background-color: #4CAF50; color: white; border: none; cursor: pointer; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 500px; margin: 40px auto; padding: 20px; text-align: center; }
+    input, button { padding: 12px; margin: 10px 0; width: 85%; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; box-sizing: border-box; }
+    button { background-color: #4CAF50; color: white; border: none; font-weight: bold; cursor: pointer; }
     button:disabled { background-color: #ccc; }
-    #result { margin-top: 20px; text-align: left; background: #f9f9f9; padding: 15px; border-radius: 5px; }
+    #result { margin-top: 20px; text-align: left; background: #f9f9f9; padding: 15px; border-radius: 8px; }
+    .audio-btn { background: #007AFF; margin-top: 10px; width: auto; padding: 6px 15px; font-size: 14px; }
   </style>
 </head>
 <body>
@@ -23,9 +24,20 @@
   <div id="result"></div>
 
   <script>
-    // 替换为你的 Google Apps Script Web App URL
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbxZhdbmtcCtBQOIHd9vy5eHtQvqpXPlecnvpVZ1qtWTope1tiGbxrtwKlBBFHOfLWfj/exec
-";
+    const GAS_URL = "YOUR_GOOGLE_APPS_SCRIPT_URL";
+
+    // 播放发音函数
+    function playAudio(word) {
+      // 官方美式发音源
+      const audioUrl = `https://dict.youdao.com/dictvoice?type=2&audio=${encodeURIComponent(word)}`;
+      const audio = new Audio(audioUrl);
+      audio.play().catch(e => {
+        // 兜底使用系统语音
+        const utterance = new SpeechSynthesisUtterance(word);
+        utterance.lang = 'en-US';
+        window.speechSynthesis.speak(utterance);
+      });
+    }
 
     async function processWord() {
       const word = document.getElementById('wordInput').value.trim();
@@ -40,49 +52,28 @@
       btn.disabled = true;
       resultDiv.innerHTML = "正在查询并记录...";
 
+      // 先播放发音（解决 iOS 异步拦截）
+      playAudio(word);
+
       try {
-        // 1. 调用 Free Dictionary API 获取音标、词性及释义
         const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
         if (!dictRes.ok) throw new Error("未找到该单词信息");
         
         const dictData = await dictRes.json();
         const entry = dictData[0];
 
-        // 获取美式音标/音频
-        let phonetic = entry.phonetic || "";
-        let audioUrl = "";
-        
-        if (entry.phonetics) {
-          const usPhonetic = entry.phonetics.find(p => p.audio && p.audio.includes("-us.mp3")) || entry.phonetics.find(p => p.audio);
-          if (usPhonetic) {
-            audioUrl = usPhonetic.audio;
-            phonetic = usPhonetic.text || phonetic;
-          }
-        }
-
+        const phonetic = entry.phonetic || (entry.phonetics.find(p => p.text)?.text) || "";
         const meaningObj = entry.meanings[0] || {};
         const partOfSpeech = meaningObj.partOfSpeech || "";
         const meaning = meaningObj.definitions[0]?.definition || "";
 
-        // 2. 播放美式发音 (若有音频链接则播放音频，否则使用系统 TTS 兜底)
-        if (audioUrl) {
-          const audio = new Audio(audioUrl);
-          audio.play();
-        } else {
-          const utterance = new SpeechSynthesisUtterance(word);
-          utterance.lang = 'en-US';
-          window.speechSynthesis.speak(utterance);
-        }
-
-        // 3. 展示在页面上
         resultDiv.innerHTML = `
-          <p><strong>单词:</strong> ${word}</p>
+          <p><strong>单词:</strong> ${word} <button class="audio-btn" onclick="playAudio('${word}')">🔊 重新播放</button></p>
           <p><strong>音标:</strong> ${phonetic}</p>
           <p><strong>词性:</strong> ${partOfSpeech}</p>
           <p><strong>释义:</strong> ${meaning}</p>
         `;
 
-        // 4. 发送到 Google Sheet
         await fetch(GAS_URL, {
           method: "POST",
           mode: "no-cors",
@@ -95,7 +86,7 @@
           })
         });
 
-        resultDiv.innerHTML += `<p style="color:green;">✓ 已自动保存到 Google Sheet！</p>`;
+        resultDiv.innerHTML += `<p style="color:green;margin-top:10px;">✓ 已保存到 Google Sheet！</p>`;
 
       } catch (err) {
         resultDiv.innerHTML = `<p style="color:red;">错误: ${err.message}</p>`;
@@ -104,10 +95,10 @@
       }
     }
 
-    // 注册 Service Worker (PWA 支持)
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js');
     }
   </script>
 </body>
 </html>
+
