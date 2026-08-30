@@ -1,115 +1,122 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>美式英语生词本</title>
-  <link rel="manifest" href="manifest.json">
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 500px; margin: 40px auto; padding: 20px; text-align: center; }
-    input, button { padding: 12px; margin: 10px 0; width: 85%; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; box-sizing: border-box; }
-    button { background-color: #4CAF50; color: white; border: none; font-weight: bold; cursor: pointer; }
-    button:disabled { background-color: #ccc; }
-    #result { margin-top: 20px; text-align: left; background: #f9f9f9; padding: 15px; border-radius: 8px; }
-    .audio-btn { background: #007AFF; margin-left: 10px; width: auto; padding: 4px 10px; font-size: 13px; display: inline-block; }
-  </style>
-</head>
-<body>
+<script>
+  // ⚠️ 替换为你自己的 Google Apps Script Web App 地址
+  const GAS_URL = "https://script.google.com/macros/s/AKfycbxZhdbmtcCtBQOIHd9vy5eHtQvqpXPlecnvpVZ1qtWTope1tiGbxrtwKlBBFHOfLWfj/exec";
 
-  <h2>美式英语生词本</h2>
-  <input type="text" id="wordInput" placeholder="请输入英文单词...">
-  <br>
-  <button id="submitBtn" onclick="processWord()">查询、发音并保存</button>
+  // 1. Google 官方美式发音接口（纯正美音 en-US）
+  function playAudio(word) {
+    const googleAudioUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(word)}&tl=en-US&client=tw-ob`;
+    const audio = new Audio(googleAudioUrl);
+    audio.play().catch(() => {
+      // 备用：系统 TTS
+      const utterance = new SpeechSynthesisUtterance(word);
+      utterance.lang = 'en-US';
+      window.speechSynthesis.speak(utterance);
+    });
+  }
 
-  <div id="result"></div>
+  // 2. 使用 Google 翻译 API 获取中文释义、词性和音标
+  async function fetchGoogleTranslate(word) {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-CN&dt=t&dt=bd&dt=rm&q=${encodeURIComponent(word)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Google API 请求失败");
+    const data = await res.json();
 
-  <script>
-    // ⚠️ 替换为你自己的 Google Apps Script Web App 地址
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbxZhdbmtcCtBQOIHd9vy5eHtQvqpXPlecnvpVZ1qtWTope1tiGbxrtwKlBBFHOfLWfj/exec
-";
+    let meaning = "";
+    let partOfSpeech = "";
+    let phonetic = "";
 
-    function playAudio(word) {
-      const audioUrl = `https://dict.youdao.com/dictvoice?type=2&audio=${encodeURIComponent(word)}`;
-      const audio = new Audio(audioUrl);
-      audio.play().catch(() => {
-        const utterance = new SpeechSynthesisUtterance(word);
-        utterance.lang = 'en-US';
-        window.speechSynthesis.speak(utterance);
-      });
+    // 提取主要中文意思
+    if (data[0] && data[0][0] && data[0][0][0]) {
+      meaning = data[0][0][0];
     }
 
-    async function processWord() {
-      const word = document.getElementById('wordInput').value.trim();
-      const resultDiv = document.getElementById('result');
-      const btn = document.getElementById('submitBtn');
+    // 提取美式拼音/音标 (拼音/IPA)
+    if (data[0] && data[0][1] && data[0][1][3]) {
+      phonetic = data[0][1][3];
+    }
 
-      if (!word) {
-        alert("请输入单词！");
-        return;
-      }
+    // 提取词性 (如 noun, adjective)
+    if (data[1] && data[1][0] && data[1][0][0]) {
+      partOfSpeech = data[1][0][0]; // 例如 noun, verb
+    }
 
-      btn.disabled = true;
-      resultDiv.innerHTML = "正在查询并记录...";
+    return { meaning, partOfSpeech, phonetic };
+  }
 
-      // 播放发音
-      playAudio(word);
+  async function processWord() {
+    const word = document.getElementById('wordInput').value.trim();
+    const resultDiv = document.getElementById('result');
+    const btn = document.getElementById('submitBtn');
 
-      let phonetic = "";
-      let partOfSpeech = "";
-      let meaning = "";
+    if (!word) {
+      alert("请输入单词！");
+      return;
+    }
 
-      // 1. 获取单词释义与音标
-      try {
-        const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`);
-        if (dictRes.ok) {
+    btn.disabled = true;
+    resultDiv.innerHTML = "正在查询并记录...";
+
+    // 播放 Google 美式发音
+    playAudio(word);
+
+    let phonetic = "";
+    let partOfSpeech = "";
+    let meaning = "";
+
+    try {
+      // 查询 Google 翻译 API
+      const result = await fetchGoogleTranslate(word);
+      meaning = result.meaning || "";
+      partOfSpeech = result.partOfSpeech || "";
+      phonetic = result.phonetic || "";
+
+      // 如果 Google 没有查到音标，尝试用字典 API 补充音标
+      if (!phonetic) {
+        const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`).catch(() => null);
+        if (dictRes && dictRes.ok) {
           const dictData = await dictRes.json();
-          const entry = dictData[0];
-          phonetic = entry.phonetic || (entry.phonetics && entry.phonetics.find(p => p.text)?.text) || "";
-          const meaningObj = (entry.meanings && entry.meanings[0]) || {};
-          partOfSpeech = meaningObj.partOfSpeech || "";
-          meaning = meaningObj.definitions[0]?.definition || "";
-        } else {
-          meaning = "未找到详细释义";
+          phonetic = dictData[0]?.phonetic || (dictData[0]?.phonetics?.find(p => p.text)?.text) || "";
         }
-      } catch (e) {
-        meaning = "词典查询受限（已记录单词）";
       }
-
-      // 2. 渲染前端页面
-      resultDiv.innerHTML = `
-        <p><strong>单词:</strong> ${word} <button class="audio-btn" onclick="playAudio('${word}')">🔊 播放</button></p>
-        <p><strong>音标:</strong> ${phonetic || '-'}</p>
-        <p><strong>词性:</strong> ${partOfSpeech || '-'}</p>
-        <p><strong>释义:</strong> ${meaning || '-'}</p>
-      `;
-
-      // 3. 提交数据给 Google Sheets（使用原生 form 方案，百分百穿透 Safari 跨域限制）
-      try {
-        const formData = new FormData();
-        formData.append('word', word);
-        formData.append('phonetic', phonetic);
-        formData.append('partOfSpeech', partOfSpeech);
-        formData.append('meaning', meaning);
-
-        await fetch(GAS_URL, {
-          method: "POST",
-          mode: "no-cors",
-          body: formData
-        });
-
-        resultDiv.innerHTML += `<p style="color:green;margin-top:10px;font-weight:bold;">✓ 已成功写入 Google Sheet！</p>`;
-      } catch (err) {
-        resultDiv.innerHTML += `<p style="color:red;margin-top:10px;">写入 Sheet 失败: ${err.message}</p>`;
-      } finally {
-        btn.disabled = false;
-      }
+    } catch (e) {
+      console.error("查询失败:", e);
+      meaning = "查询失败，请检查网络";
     }
 
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js');
+    // 渲染前端结果
+    resultDiv.innerHTML = `
+      <p><strong>单词:</strong> ${word} <button class="audio-btn" onclick="playAudio('${word}')">🔊 播放</button></p>
+      <p><strong>音标:</strong> ${phonetic || '-'}</p>
+      <p><strong>词性:</strong> ${partOfSpeech || '-'}</p>
+      <p><strong>中文释义:</strong> ${meaning || '-'}</p>
+    `;
+
+    // 提交到 Google Sheets
+    try {
+      const formData = new FormData();
+      formData.append('word', word);
+      formData.append('phonetic', phonetic);
+      formData.append('partOfSpeech', partOfSpeech);
+      formData.append('meaning', meaning);
+
+      await fetch(GAS_URL, {
+        method: "POST",
+        mode: "no-cors",
+        body: formData
+      });
+
+      resultDiv.innerHTML += `<p style="color:green;margin-top:10px;font-weight:bold;">✓ 已成功写入 Google Sheet！</p>`;
+    } catch (err) {
+      resultDiv.innerHTML += `<p style="color:red;margin-top:10px;">写入 Sheet 失败: ${err.message}</p>`;
+    } finally {
+      btn.disabled = false;
     }
-  </script>
-</body>
-</html>
+  }
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js');
+  }
+</script>
+
 
 
