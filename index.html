@@ -24,8 +24,8 @@
   <div id="result"></div>
 
   <script>
-  // ⚠️ 替换为你最新的 Google Apps Script Web App 地址
-  const GAS_URL = "https://script.google.com/macros/s/AKfycby4TSaY4PzIVZX-hczpOCzNs2A4hxtjTXZSbsdju4zSgtCLXeUblE1wDLBq5Pi0zOvh/exec";
+  // ⚠️ 粘贴你刚刚新生成的 Web App URL（结尾必须是 /exec）
+  const GAS_URL = "https://script.google.com/macros/s/AKfycbyFv2zLNxi2CESerHMQuquqnEMqYtK3yNFGx3y82JrXAJAi6NSXWra4zDC6Ry4uKdTm/exec";
 
   function playAudio(word) {
     try {
@@ -34,8 +34,62 @@
       utterance.rate = 0.9;
       window.speechSynthesis.speak(utterance);
     } catch(e) {
-      console.log("语音播放错误:", e);
+      console.log("发音错误:", e);
     }
+  }
+
+  // 查词逻辑
+  async function fetchWordDetails(word) {
+    let phonetic = "";
+    let partOfSpeech = "";
+    let meaning = "";
+
+    // 1. 获取音标和词性
+    try {
+      const dictRes = await fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word));
+      if (dictRes.ok) {
+        const dictData = await dictRes.json();
+        if (dictData && dictData[0]) {
+          const entry = dictData[0];
+          // 查找美音音标
+          if (entry.phonetic) {
+            phonetic = entry.phonetic;
+          } else if (entry.phonetics && entry.phonetics.length > 0) {
+            const usItem = entry.phonetics.find(p => p.audio && p.audio.includes('-us'));
+            const textItem = entry.phonetics.find(p => p.text);
+            phonetic = (usItem && usItem.text) || (textItem && textItem.text) || "";
+          }
+
+          // 提取词性
+          if (entry.meanings && entry.meanings.length > 0) {
+            const posList = entry.meanings.map(m => m.partOfSpeech);
+            // 去重合并
+            partOfSpeech = [...new Set(posList)].join(", ");
+          }
+        }
+      }
+    } catch (e) {
+      console.error("查音标失败:", e);
+    }
+
+    // 2. 获取中文释义
+    try {
+      const transRes = await fetch("https://api.mymemory.translated.net/get?q=" + encodeURIComponent(word) + "&langpair=en|zh-CN");
+      if (transRes.ok) {
+        const transData = await transRes.json();
+        if (transData && transData.responseData) {
+          meaning = transData.responseData.translatedText || "";
+        }
+      }
+    } catch (e) {
+      console.error("查翻译失败:", e);
+    }
+
+    return {
+      phonetic: phonetic ? (phonetic.startsWith('/') ? phonetic : '/' + phonetic + '/') : "-" ,
+      partOfSpeech: partOfSpeech || "-",
+      meaning: meaning || "-"
+    };
   }
 
   async function processWord() {
@@ -51,37 +105,39 @@
     }
 
     btn.disabled = true;
-    resultDiv.innerHTML = "正在查询并记录...";
+    resultDiv.innerHTML = "正在查询并保存...";
 
-    // 播放发音
     playAudio(word);
 
     try {
-      // 一步到位发送给 Google，后台会自动解析字典并写入 Sheet
-      const response = await fetch(`${GAS_URL}?word=${encodeURIComponent(word)}`, {
-        method: "POST"
-      });
+      // 在前端完成查询
+      const details = await fetchWordDetails(word);
 
-      // 预设兜底，以便在 no-cors 模式下正常读取展示
-      let data = { phonetic: "-", partOfSpeech: "-", meaning: "-" };
-
-      try {
-        data = await response.json();
-      } catch(e) {
-        // 如果跨域模式阻止了读取 JSON，使用 Google 后端默认处理逻辑展示
-      }
-
-      // 如果数据成功解析，展示渲染
+      // 实时展示结果
       resultDiv.innerHTML = `
         <p><strong>单词:</strong> ${word} <button class="audio-btn" onclick="playAudio('${word}')">🔊 播放</button></p>
-        <p><strong>音标:</strong> ${data.phonetic}</p>
-        <p><strong>词性:</strong> ${data.partOfSpeech}</p>
-        <p><strong>中文释义:</strong> ${data.meaning}</p>
-        <p style="color:green;margin-top:10px;font-weight:bold;">✓ 已成功写入 Google Sheet！</p>
+        <p><strong>音标:</strong> ${details.phonetic}</p>
+        <p><strong>词性:</strong> ${details.partOfSpeech}</p>
+        <p><strong>中文释义:</strong> ${details.meaning}</p>
       `;
 
+      // 提交到 Google Sheet
+      const formData = new FormData();
+      formData.append('word', word);
+      formData.append('phonetic', details.phonetic);
+      formData.append('partOfSpeech', details.partOfSpeech);
+      formData.append('meaning', details.meaning);
+
+      await fetch(GAS_URL, {
+        method: "POST",
+        mode: "no-cors",
+        body: formData
+      });
+
+      resultDiv.innerHTML += `<p style="color:green;margin-top:10px;font-weight:bold;">✓ 已成功写入 Google Sheet！</p>`;
+
     } catch (err) {
-      resultDiv.innerHTML = `<p style="color:red;margin-top:10px;">处理成功并已提交！</p>`;
+      resultDiv.innerHTML += `<p style="color:red;margin-top:10px;">错误详情: ${err.message}</p>`;
     } finally {
       btn.disabled = false;
     }
@@ -91,6 +147,7 @@
     navigator.serviceWorker.register('sw.js').catch(function(){});
   }
 </script>
+
 </body>
 </html>
 
