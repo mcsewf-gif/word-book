@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>单词记账本 PWA</title>
+  <title>美式英语生词本</title>
   <link rel="manifest" href="manifest.json">
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 500px; margin: 40px auto; padding: 20px; text-align: center; }
@@ -11,7 +11,7 @@
     button { background-color: #4CAF50; color: white; border: none; font-weight: bold; cursor: pointer; }
     button:disabled { background-color: #ccc; }
     #result { margin-top: 20px; text-align: left; background: #f9f9f9; padding: 15px; border-radius: 8px; }
-    .audio-btn { background: #007AFF; margin-top: 10px; width: auto; padding: 6px 15px; font-size: 14px; }
+    .audio-btn { background: #007AFF; margin-left: 10px; width: auto; padding: 4px 10px; font-size: 13px; display: inline-block; }
   </style>
 </head>
 <body>
@@ -24,15 +24,13 @@
   <div id="result"></div>
 
   <script>
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbxZhdbmtcCtBQOIHd9vy5eHtQvqpXPlecnvpVZ1qtWTope1tiGbxrtwKlBBFHOfLWfj/exec";
+    // ⚠️ 替换为你自己的 Google Apps Script Web App 地址
+    const GAS_URL = "YOUR_GOOGLE_APPS_SCRIPT_URL";
 
-    // 播放发音函数
     function playAudio(word) {
-      // 官方美式发音源
       const audioUrl = `https://dict.youdao.com/dictvoice?type=2&audio=${encodeURIComponent(word)}`;
       const audio = new Audio(audioUrl);
-      audio.play().catch(e => {
-        // 兜底使用系统语音
+      audio.play().catch(() => {
         const utterance = new SpeechSynthesisUtterance(word);
         utterance.lang = 'en-US';
         window.speechSynthesis.speak(utterance);
@@ -52,44 +50,55 @@
       btn.disabled = true;
       resultDiv.innerHTML = "正在查询并记录...";
 
-      // 先播放发音（解决 iOS 异步拦截）
+      // 播放发音
       playAudio(word);
 
+      let phonetic = "";
+      let partOfSpeech = "";
+      let meaning = "";
+
+      // 1. 获取单词释义与音标
       try {
-        const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
-        if (!dictRes.ok) throw new Error("未找到该单词信息");
-        
-        const dictData = await dictRes.json();
-        const entry = dictData[0];
+        const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`);
+        if (dictRes.ok) {
+          const dictData = await dictRes.json();
+          const entry = dictData[0];
+          phonetic = entry.phonetic || (entry.phonetics && entry.phonetics.find(p => p.text)?.text) || "";
+          const meaningObj = (entry.meanings && entry.meanings[0]) || {};
+          partOfSpeech = meaningObj.partOfSpeech || "";
+          meaning = meaningObj.definitions[0]?.definition || "";
+        } else {
+          meaning = "未找到详细释义";
+        }
+      } catch (e) {
+        meaning = "词典查询受限（已记录单词）";
+      }
 
-        const phonetic = entry.phonetic || (entry.phonetics.find(p => p.text)?.text) || "";
-        const meaningObj = entry.meanings[0] || {};
-        const partOfSpeech = meaningObj.partOfSpeech || "";
-        const meaning = meaningObj.definitions[0]?.definition || "";
+      // 2. 渲染前端页面
+      resultDiv.innerHTML = `
+        <p><strong>单词:</strong> ${word} <button class="audio-btn" onclick="playAudio('${word}')">🔊 播放</button></p>
+        <p><strong>音标:</strong> ${phonetic || '-'}</p>
+        <p><strong>词性:</strong> ${partOfSpeech || '-'}</p>
+        <p><strong>释义:</strong> ${meaning || '-'}</p>
+      `;
 
-        resultDiv.innerHTML = `
-          <p><strong>单词:</strong> ${word} <button class="audio-btn" onclick="playAudio('${word}')">🔊 重新播放</button></p>
-          <p><strong>音标:</strong> ${phonetic}</p>
-          <p><strong>词性:</strong> ${partOfSpeech}</p>
-          <p><strong>释义:</strong> ${meaning}</p>
-        `;
+      // 3. 提交数据给 Google Sheets（使用原生 form 方案，百分百穿透 Safari 跨域限制）
+      try {
+        const formData = new FormData();
+        formData.append('word', word);
+        formData.append('phonetic', phonetic);
+        formData.append('partOfSpeech', partOfSpeech);
+        formData.append('meaning', meaning);
 
         await fetch(GAS_URL, {
           method: "POST",
           mode: "no-cors",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            word: word,
-            phonetic: phonetic,
-            partOfSpeech: partOfSpeech,
-            meaning: meaning
-          })
+          body: formData
         });
 
-        resultDiv.innerHTML += `<p style="color:green;margin-top:10px;">✓ 已保存到 Google Sheet！</p>`;
-
+        resultDiv.innerHTML += `<p style="color:green;margin-top:10px;font-weight:bold;">✓ 已成功写入 Google Sheet！</p>`;
       } catch (err) {
-        resultDiv.innerHTML = `<p style="color:red;">错误: ${err.message}</p>`;
+        resultDiv.innerHTML += `<p style="color:red;margin-top:10px;">写入 Sheet 失败: ${err.message}</p>`;
       } finally {
         btn.disabled = false;
       }
@@ -101,4 +110,5 @@
   </script>
 </body>
 </html>
+
 
